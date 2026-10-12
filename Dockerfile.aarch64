@@ -1,0 +1,39 @@
+FROM nexus.guhecloud.com:5000/ghcloud/bun-ci:1.3 AS builder
+
+USER bun
+
+ARG BRANCH=main
+
+WORKDIR /app
+
+RUN mkdir -p -m 0700 ~/.ssh
+
+COPY --chown=bun:bun ./id_rsa /home/bun/.ssh/
+
+RUN chmod 600 ~/.ssh/id_rsa && ssh-keyscan git.guhecloud.com >> ~/.ssh/known_hosts
+
+RUN rm -rf /app/cube2-mcp
+
+RUN cd /app && git clone -b ${BRANCH} git@git.guhecloud.com:ghcloud/ai/cube2-mcp.git
+
+RUN cd /app/cube2-mcp && bun install --frozen-lockfile --production --ignore-scripts
+
+RUN cd /app/cube2-mcp && bun run build:node
+
+FROM nexus.guhecloud.com:5000/node:24.14.1-slim AS cube2-mcp
+
+WORKDIR /app
+
+COPY --from=builder /app/cube2-mcp/dist/cube2-mcp.mjs /app/
+
+USER bun
+
+ENV MCP_TRANSPORT=http \
+    MCP_HOST=0.0.0.0 \
+    MCP_PORT=3000 \
+    MCP_PATH=/mcp \
+    MCP_SERVER_NAME=cube2-mcp
+
+EXPOSE 3000/tcp
+
+ENTRYPOINT ["node", "/app/cube2-mcp.mjs", "--transport", "http"]
